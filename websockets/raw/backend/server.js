@@ -1,6 +1,8 @@
 import http from "http";
 import handler from "serve-handler";
 import nanobuffer from "nanobuffer";
+
+// these are helpers to help you deal with the binary data that websockets use
 import objToResponse from "./obj-to-response.js";
 import generateAcceptValue from "./generate-accept-value.js";
 import parseMessage from "./parse-message.js";
@@ -10,7 +12,7 @@ const msg = new nanobuffer(50);
 const getMsgs = () => Array.from(msg).reverse();
 
 msg.push({
-  user: "brian",
+  user: "sarthak",
   text: "hi",
   time: Date.now(),
 });
@@ -22,50 +24,43 @@ const server = http.createServer((request, response) => {
   });
 });
 
-server.on("upgrade", function (req, socket) {
-  if (req.headers["upgrade"] !== "websocket") {
-    // we only care about websockets
-    socket.end("HTTP/1.1 400 Bad Request");
-    return;
+server.on("upgrade",(req,socket)=>{
+  if(req.headers["upgrade"] !== "websocket"){
+    return socket.destroy();
   }
-  const acceptKey = req.headers["sec-websocket-key"];
-  const acceptValue = generateAcceptValue(acceptKey);
+  const acceptKey = req.headers['sec-websocket-key']
+  const acceptValue = generateAcceptValue(acceptKey)
   const headers = [
     "HTTP/1.1 101 Web Socket Protocol Handshake",
     "Upgrade: WebSocket",
     "Connection: Upgrade",
     `Sec-WebSocket-Accept: ${acceptValue}`,
     "Sec-WebSocket-Protocol: json",
-    "\r\n",
-  ];
+    "\r\n" // to signify the browser that the headers are done
+  ]
+  socket.write(headers.join("\r\n"))
+  socket.write(objToResponse({msg: getMsgs()}))
+  connections.push(socket)
 
-  socket.write(headers.join("\r\n"));
-
-  socket.write(objToResponse({ msg: getMsgs() }));
-
-  connections.push(socket);
-
-  socket.on("data", (buffer) => {
-    const message = parseMessage(buffer);
-    if (message) {
-      console.log(message);
+  socket.on("data",(buffer)=>{
+    const message = parseMessage(buffer)
+    if(message)
+    {
       msg.push({
-        user: message.user,
-        text: message.text,
+        ...message,
         time: Date.now(),
-      });
-
-      connections.forEach((s) => s.write(objToResponse({ msg: getMsgs() })));
-    } else if (message === null) {
-      // remove from my active connections
-      socket.end();
+      })
+      connections.forEach(connection=>{
+        connection.write(objToResponse({msg: getMsgs()}))
+      })
     }
-  });
+    else if(message === null) socket.end()
+  })
 
-  socket.on("end", () => {
-    connections = connections.filter((s) => s !== socket);
-  });
-});
+  socket.on("end",()=>{
+    connections = connections.filter(connection=>connection!==socket)
+  })
+})
 
 const port = process.env.PORT || 8080;
 server.listen(port, () =>
