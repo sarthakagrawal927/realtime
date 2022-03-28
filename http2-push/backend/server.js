@@ -2,7 +2,7 @@ import http2 from "http2";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import handler from "serve-handler";
+import handler from "serve-handler"; // vercel uses this to send static files
 import nanobuffer from "nanobuffer";
 
 let connections = [];
@@ -11,13 +11,14 @@ const msg = new nanobuffer(50);
 const getMsgs = () => Array.from(msg).reverse();
 
 msg.push({
-  user: "brian?",
+  user: "brian",
   text: "hi",
   time: Date.now(),
 });
 
 // openssl req -new -newkey rsa:2048 -new -nodes -keyout key.pem -out csr.pem
 // openssl x509 -req -days 365 -in csr.pem -signkey key.pem -out server.crt
+//
 // http2 only works over HTTPS
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const server = http2.createSecureServer({
@@ -25,30 +26,31 @@ const server = http2.createSecureServer({
   key: fs.readFileSync(path.join(__dirname, "/../key.pem")),
 });
 
-server.on("stream", (stream, headers) => {
-  const method = headers[":method"];
+server.on("stream",(stream,headers)=>{
   const path = headers[":path"];
+  const method = headers[":method"];
 
-  // streams will open for everything, we want just GETs on /msgs
-  if (path === "/msgs" && method === "GET") {
+  // streams open for every request from the browser
+  if(path === '/msgs' && method === 'GET') {
     // immediately respond with 200 OK and encoding
+    console.log("Connected to stream", stream.id)
     stream.respond({
       ":status": 200,
+      // there is no way to stream json, and the chunks standalone wont be a valid json
       "content-type": "text/plain; charset=utf-8",
-    });
+    })
 
-    // write the first response
-    stream.write(JSON.stringify({ msg: getMsgs() }));
+    stream.write(JSON.stringify({msg: getMsgs()}))
 
     // keep track of the connection
     connections.push(stream);
 
-    // when the connection closes, stop keeping track of it
-    stream.on("close", () => {
-      connections = connections.filter((s) => s !== stream);
-    });
+    stream.on("close",()=>{
+      console.log("disconnected "+ stream.id)
+      connections = connections.filter(c => c !== stream)
+    })
   }
-});
+})
 
 server.on("request", async (req, res) => {
   const path = req.headers[":path"];
@@ -61,25 +63,18 @@ server.on("request", async (req, res) => {
     });
   } else if (method === "POST") {
     // get data out of post
+    // this is what jsonParser does
     const buffers = [];
     for await (const chunk of req) {
       buffers.push(chunk);
     }
     const data = Buffer.concat(buffers).toString();
     const { user, text } = JSON.parse(data);
-    msg.push({
-      user,
-      text,
-      time: Date.now(),
-    });
 
-    // all done with the request
+    msg.push({user,text, time: Date.now()})
     res.end();
 
-    // notify all connected users
-    connections.forEach((stream) => {
-      stream.write(JSON.stringify({ msg: getMsgs() }));
-    });
+    connections.forEach(c => c.write(JSON.stringify({msg: getMsgs()})))
   }
 });
 
