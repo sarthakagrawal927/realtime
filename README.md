@@ -1,5 +1,7 @@
 # realtime
 
+All the details here are a part of a course, done for me to expand/test my knowledge on realtime.
+
 ## Polling
 
 Just responding to a HTTP request a lot. Simplest implementation to real time.
